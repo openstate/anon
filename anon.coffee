@@ -41,7 +41,7 @@ main = ->
     if edit.anonymous
       for name, ranges of config.ranges
         if isIpInAnyRange edit.user, ranges
-          status = edit.page + ' Wikipedia article edited anonymously by ' + name + ' ' + edit.url
+          status = edit.page + ' ' + config.message_template + ' ' + name + ' ' + edit.url
           console.log status
           return if argv.noop
           twitter.post 'statuses/update', status: status, (err, d, r) ->

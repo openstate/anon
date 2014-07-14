@@ -4,6 +4,7 @@
   "consumer_secret": "",
   "access_token": "",
   "access_token_secret": "",
+  "message_template": "Wikipedia article edited anonymously by",
   "ranges": {
     "US House of Representatives": [
       ["143.231.0.0", "143.231.255.255"],
@@ -18,5 +19,3 @@
     ]
   }
 }
-
-
