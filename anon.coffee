@@ -1,53 +1,91 @@
-Twit        = require 'twit'
-Netmask     = require('netmask').Netmask
-minimist    = require 'minimist'
-WikiChanges = require('wikichanges').WikiChanges
+#!/usr/bin/env coffee
 
-argv = minimist process.argv.slice(2), default: config: './config.json'
+Twit          = require 'twit'
+{Netmask}     = require 'netmask'
+minimist      = require 'minimist'
+{WikiChanges} = require 'wikichanges'
+Mustache      = require 'mustache'
 
-ipToQuad = (ip) ->
-  return (parseInt(s) for s in ip.split('.'))
+argv = minimist process.argv.slice(2), default:
+  verbose: false
+  config: './config.json'
+
+ipToInt = (ip) ->
+  octets = (parseInt(s) for s in ip.split('.'))
+  result = 0
+  result += n * Math.pow(256, i) for n, i in octets.reverse()
+  result
 
 compareIps = (ip1, ip2) ->
-  q1 = ipToQuad(ip1)
-  q2 = ipToQuad(ip2)
-  if "#{q1}" is "#{q2}"
-    r = 0
+  q1 = ipToInt(ip1)
+  q2 = ipToInt(ip2)
+  if q1 == q2
+    0
   else if q1 < q2
-    r = -1
+    -1
   else
-    r = 1
-  return r
+    1
 
 isIpInRange = (ip, block) ->
   if Array.isArray block
-    return compareIps(ip, block[0]) >= 0 and compareIps(ip, block[1]) <= 0
+    compareIps(ip, block[0]) >= 0 and compareIps(ip, block[1]) <= 0
   else
-    return new Netmask(block).contains ip
+    new Netmask(block).contains ip
 
 isIpInAnyRange = (ip, blocks) ->
-  for block in blocks
-    if isIpInRange(ip, block)
-      return true
-  return false
+  blocks.filter((block) -> isIpInRange(ip, block)).length > 0
+
+getConfig = (path) ->
+  if path[0] != '/' and path[0..1] != './'
+    path = './' + path
+  require(path)
+
+getStatusLength = (edit, name, template) ->
+  # returns length of the tweet based on shortened url
+  # https://support.twitter.com/articles/78124-posting-links-in-a-tweet
+  fakeUrl = 'http://t.co/BzHLWr31Ce'
+  status = Mustache.render template, name: name, url: fakeUrl, page: edit.page
+  status.length
+
+getStatus = (edit, name, template) ->
+  len = getStatusLength edit, name, template
+  if len > 140
+    newLength = edit.page.length - (len - 139)
+    page = edit.page[0..newLength]
+  else
+    page = edit.page
+  Mustache.render template,
+    name: name
+    url: edit.url
+    page: page
+
+tweet = (account, status) ->
+  console.log status
+  unless argv.noop
+    twitter = new Twit account
+    twitter.post 'statuses/update', status: status, (err) ->
+      console.log err if err
+
+inspect = (account, edit) ->
+  if edit.url
+    if argv.verbose
+      console.log edit.url
+    if account.whitelist and account.whitelist[edit.wikipedia] \
+        and account.whitelist[edit.wikipedia][edit.page]
+      status = getStatus edit, edit.user, account.template
+      tweet account, status
+    else if account.ranges and edit.anonymous
+      for name, ranges of account.ranges
+        if isIpInAnyRange edit.user, ranges
+          status = getStatus edit, name, account.template
+          tweet account, status
 
 main = ->
-  config = require(argv.config)
-  twitter = new Twit config unless argv['noop']
-  wikipedia = new WikiChanges(ircNickname: config.nick)
+  config = getConfig argv.config
+  wikipedia = new WikiChanges ircNickname: config.nick
   wikipedia.listen (edit) ->
-    # if we have an anonymous edit, then edit.user will be the ip address
-    # we iterate through each group of ip ranges looking for a match
-    if edit.anonymous
-      for name, ranges of config.ranges
-        if isIpInAnyRange edit.user, ranges
-          status = edit.page + ' ' + config.message_template + ' ' + name + ' ' + edit.url
-          console.log status
-          return if argv.noop
-          twitter.post 'statuses/update', status: status, (err, d, r) ->
-            if err
-              console.log err
-          return
+    for account in config.accounts
+      inspect account, edit
 
 if require.main == module
   main()
@@ -56,4 +94,6 @@ if require.main == module
 exports.compareIps = compareIps
 exports.isIpInRange = isIpInRange
 exports.isIpInAnyRange = isIpInAnyRange
-exports.run = main
+exports.ipToInt = ipToInt
+exports.getStatus = getStatus
+exports.main = main
